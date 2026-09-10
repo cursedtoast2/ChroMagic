@@ -1,0 +1,6 @@
+managed_components/
+build/
+sdkconfig
+tools/__pycache__/
+tools/pc-backup/target/
+tools/pc-backup/.env.local

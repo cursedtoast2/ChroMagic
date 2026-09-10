@@ -1,0 +1,6 @@
+**/tests/host/evidence/
+.env*
+*.gb
+*.gbc
+*.sav
+*.rtc

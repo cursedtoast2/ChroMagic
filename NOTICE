@@ -1,0 +1,13 @@
+ChroMagic is based on ModRetro's Chromatic firmware and FPGA design.
+See mcu/LICENSE and fpga/LICENSE for their license terms.
+
+Upstream FPGA acknowledgments:
+GOWIN Semiconductor: https://www.gowinsemi.com/en/
+MiSTer Gameboy core: https://github.com/MiSTer-devel/Gameboy_MiSTer
+The MiSTer core is a port of Gameboy for MiST:
+https://github.com/mist-devel/gameboy
+Thanks to rayjt9 for palette improvements to the BootROM.
+
+The MiSTer boot ROM sources are adapted from SameBoy:
+https://github.com/LIJI32/SameBoy/
+Their MIT license notices are retained in the source files.
