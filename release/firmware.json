@@ -1,16 +1,16 @@
 {
   "schema_version": 1,
   "version": {
-    "chromatic": "1.0.0 (4.2)",
+    "chromatic": "1.0.1 (4.2)",
     "mcu": "v0.13.4",
     "fpga": "18.38"
   },
   "mcu": {
     "file": "mcu.bin",
-    "sha256": "b84e3ab7448c62528ea630fe258bdc743b83f098e1482ba6f2b7a86addec3636"
+    "sha256": "6c7f08c0b1b27f0a56dd412b1c891cc981f269a845dd3940e92bf5a3266cdb6a"
   },
   "fpga": {
     "file": "fpga.fs",
-    "sha256": "2c6ef24d1e3198662bd5cde1ee0fb687567d32e24c8ab00b4ed8d7ae2cc68b4e"
+    "sha256": "79791d915060a9898c9be6adc7ab22f298cbea9619c6bb765b8667db62c337a2"
   }
 }
