@@ -390,6 +390,10 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_console_start_repl(pRepl));
     PCBackup_ConsoleReady();
 
-    vTaskDelay( pdMS_TO_TICKS(2000) );
+    for (size_t i = 0; i < 40; i++)
+    {
+        vTaskDelay( pdMS_TO_TICKS(50) );
+        FPGA_Tx_SendAll();
+    }
     xTaskCreate(PwrMgr_Task, "pwr_mgr_task", kSleepTask_StackDepth, NULL, kSleepTask_Priority, NULL);
 }
