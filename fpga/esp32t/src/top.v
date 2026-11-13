@@ -42,7 +42,7 @@ module top #(parameter ISSIMU=0)
     output              POWER_DOWN_IO,
     input               VBUS_DET,
 
-    output reg          ESP32_IO0,
+    output              ESP32_IO0,
 
     output              I2S_BCLK,       // D16 IO33
     input               I2S_WS,         // D15 IO25 CC
@@ -1233,11 +1233,26 @@ module top #(parameter ISSIMU=0)
 
     reg ESP32_EN_INT = 1;
     reg ESP32_IO0_INT = 1;
+    reg ESP32_IO0_Q = 1;
+    reg [7:0] ESP32_IO0_STRAP_HOLD = 8'd0;
+    wire ESP32_IO0_STRAP_WINDOW = ~&ESP32_IO0_STRAP_HOLD;
+    // Drive low when the host requests download mode; drive high during the
+    // strap window; otherwise tri-state (pin pull-up keeps it high).
+    assign ESP32_IO0 = ~ESP32_IO0_Q ? 1'b0 : (ESP32_IO0_STRAP_WINDOW ? 1'b1 : 1'bz);
 
     // 8MHz clock
     always@(posedge gClk) begin
 
-        ESP32_IO0 <= ESP32_IO0_INT;
+        ESP32_IO0_Q <= ESP32_IO0_INT;
+
+        // Hold the strap actively high while the ESP32 is in reset and for
+        // ~130 ms (255 ticks of the 512 us boot-delay tick) after EN releases, so the
+        // boot strap samples a solid 1 on every board. Afterwards release the
+        // pin (weak pull-up only) so it does not fight the SD card bus.
+        if(~ESP32_EN)
+            ESP32_IO0_STRAP_HOLD <= 8'd0;
+        else if(ESP_BOOT_DELAY_COUNTER == 0 && ~&ESP32_IO0_STRAP_HOLD)
+            ESP32_IO0_STRAP_HOLD <= ESP32_IO0_STRAP_HOLD + 1'b1;
 
         ESP_BOOT_DELAY_COUNTER <= ESP_BOOT_DELAY_COUNTER + 1'b1;
 
