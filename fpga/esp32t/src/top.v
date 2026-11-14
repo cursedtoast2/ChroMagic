@@ -27,6 +27,9 @@ module top #(parameter ISSIMU=0)
     inout               CART_RST,
     output              CART_WR,
     output              CART_DATA_DIR_E,
+    output              CART_CTRL_OE,   // cart level-shifter enable, active high (newer boards)
+    output              CART_PWR_EN,    // cart supply enable (newer boards)
+    input               VERSION_DET,    // board strap: 1 = legacy board (weak pull-up)
 
     input               CART_DET,
     input               CART_AUDIN,
@@ -42,7 +45,7 @@ module top #(parameter ISSIMU=0)
     output              POWER_DOWN_IO,
     input               VBUS_DET,
 
-    output reg          ESP32_IO0,
+    output              ESP32_IO0,
 
     output              I2S_BCLK,       // D16 IO33
     input               I2S_WS,         // D15 IO25 CC
@@ -983,6 +986,24 @@ module top #(parameter ISSIMU=0)
     wire        physical_cart_data_oe;
     wire [7:0]  physical_cart_data_in = CART_D;
 
+    // Cartridge power / level-shifter sequencing (ported from stock FPGA
+    // v18.13 cartridge_interface.v). On newer boards the cart supply and the
+    // level shifter are switched by the FPGA; with CART_CTRL_OE low the
+    // shifter isolates the cart, so the bus pins (shared by the emulator core
+    // and the cart maintenance engine) are not separately gated, to save LUTs.
+    wire        cart_ready;
+    wire        cart_seq_tick;   // ~488 us tick, shared with ESP32 boot delay
+    cart_power_seq u_cart_power_seq(
+        .clk(gClk),
+        .reset_n(lock_o),
+        .tick(cart_seq_tick),
+        .cartridge_enable(~POWER_ON_FPGA),
+        .version_detect(VERSION_DET),
+        .cartridge_ready(cart_ready),
+        .CART_CTRL_OE(CART_CTRL_OE),
+        .CART_PWR_EN(CART_PWR_EN)
+    );
+
     assign CART_D = physical_cart_data_oe ? physical_cart_data_out : 8'hzz;
     assign CART_DATA_DIR_E = ~physical_cart_data_oe;
 
@@ -1108,7 +1129,7 @@ module top #(parameter ISSIMU=0)
         .xclk(xClk),
         .reset_n(~memrst_hclk),//lock_o),
         .xreset(memrst),
-        .POWER_GOOD(~POWER_ON_FPGA),
+        .POWER_GOOD(cart_ready),
         .maintenance_reset_h(cart_maintenance_reset_h),
         .virtual_attempt_reset_h(virtual_attempt_reset_h),
         .virtual_quiesce_h(virtual_quiesce_h),
@@ -1228,16 +1249,32 @@ module top #(parameter ISSIMU=0)
 
 
     reg [11:0] ESP_BOOT_DELAY_COUNTER = 0;
+    assign cart_seq_tick = (ESP_BOOT_DELAY_COUNTER == 0);
     reg [7:0] ESP_BOOT_DELAY_SHIFT = 0;
 
 
     reg ESP32_EN_INT = 1;
     reg ESP32_IO0_INT = 1;
+    reg ESP32_IO0_Q = 1;
+    reg [7:0] ESP32_IO0_STRAP_HOLD = 8'd0;
+    wire ESP32_IO0_STRAP_WINDOW = ~&ESP32_IO0_STRAP_HOLD;
+    // Drive low when the host requests download mode; drive high during the
+    // strap window; otherwise tri-state (pin pull-up keeps it high).
+    assign ESP32_IO0 = ~ESP32_IO0_Q ? 1'b0 : (ESP32_IO0_STRAP_WINDOW ? 1'b1 : 1'bz);
 
     // 8MHz clock
     always@(posedge gClk) begin
 
-        ESP32_IO0 <= ESP32_IO0_INT;
+        ESP32_IO0_Q <= ESP32_IO0_INT;
+
+        // Hold the strap actively high while the ESP32 is in reset and for
+        // ~130 ms (255 ticks of the 512 us boot-delay tick) after EN releases, so the
+        // boot strap samples a solid 1 on every board. Afterwards release the
+        // pin (weak pull-up only) so it does not fight the SD card bus.
+        if(~ESP32_EN)
+            ESP32_IO0_STRAP_HOLD <= 8'd0;
+        else if(ESP_BOOT_DELAY_COUNTER == 0 && ~&ESP32_IO0_STRAP_HOLD)
+            ESP32_IO0_STRAP_HOLD <= ESP32_IO0_STRAP_HOLD + 1'b1;
 
         ESP_BOOT_DELAY_COUNTER <= ESP_BOOT_DELAY_COUNTER + 1'b1;
 
@@ -1480,4 +1517,55 @@ module top #(parameter ISSIMU=0)
 
     assign I2S_BCLK = menuDisabled;
 
+endmodule
+
+// Cartridge power sequencing (compact port of stock v18.13
+// cartridge_interface.v). Legacy boards (VERSION_DET strap high): OE and
+// ready follow the power switch, no delay (same as before). Newer boards:
+// power the cart, ~62.5 ms later enable the level shifter, ~15.6 ms later
+// report ready (releases emulator reset). On power-down PWR_EN/OE drop
+// immediately; re-power only after ~15.6 ms off. Instead of the stock 32-bit
+// timer, an 8-bit counter of the existing ~488 us gClk tick (4096 gClk) is used.
+module cart_power_seq (
+    input  clk,
+    input  reset_n,
+    input  tick,
+    input  cartridge_enable,
+    input  version_detect,
+    output cartridge_ready,
+    output CART_CTRL_OE,
+    output CART_PWR_EN
+);
+    reg [1:0] enable_sync;
+    reg [1:0] version_sync;
+    reg [1:0] version_valid;
+    reg       legacy;
+    reg       on;
+    reg [7:0] timer;
+    wire en = enable_sync[1];
+    wire up_done   = timer[7] & timer[5];
+    wire down_done = timer[5];
+    always @(posedge clk or negedge reset_n) begin
+        if (!reset_n) begin
+            enable_sync <= 2'b00; version_sync <= 2'b00; version_valid <= 2'b00;
+            legacy <= 1'b0; on <= 1'b0; timer <= 8'h20;
+        end else begin
+            enable_sync  <= {enable_sync[0], cartridge_enable};
+            version_sync <= {version_sync[0], version_detect};
+            version_valid <= {version_valid[0], 1'b1};
+            if (!version_valid[1])
+                legacy <= version_sync[1];
+            else if (on != en) begin
+                if (on || down_done) begin
+                    on <= en;
+                    timer <= 8'd0;
+                end else if (tick) timer <= timer + 1'b1;
+            end else if (tick && (on ? !up_done : !down_done))
+                timer <= timer + 1'b1;
+        end
+    end
+    wire powered = on & en;
+    assign CART_PWR_EN = powered;
+    assign CART_CTRL_OE = legacy ? en : (powered & timer[7]);
+    assign cartridge_ready = legacy ? en : (powered & up_done);
 endmodule
